@@ -1,0 +1,11 @@
+# Proposed local integration; requires the future polyjuice-stream server to be running.
+# Run LiteLLM on the same host, or replace api_base with a reachable service URL.
+model_list:
+  - model_name: demo
+    litellm_params:
+      model: openai/replay-model
+      api_base: http://127.0.0.1:8000/v1
+      api_key: unused
+
+general_settings:
+  always_include_stream_usage: false

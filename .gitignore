@@ -1,0 +1,35 @@
+# Build and generated output
+/bin/
+/dist/
+/out/
+/coverage/
+*.test
+coverage.out
+
+# Local data and configuration
+/data/
+.env
+.env.*
+!.env.example
+config.local.yaml
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+
+# Publish PNG diagrams; keep editable sources and other exports local
+/assets/images/*
+!/assets/images/*.png
+/assets/images/conversation-reference-*.png
+
+# Private conversation archives
+/docs/conversation*.md
+
+# Local runs and tool state
+*.log
+/logs/
+/tmp/
+/.cache/
+/.codex/
+/.claude/

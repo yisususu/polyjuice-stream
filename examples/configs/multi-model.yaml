@@ -1,0 +1,19 @@
+# Draft v0.1 configuration; no implementation exists yet.
+listen: "127.0.0.1:8000"
+
+models:
+  random-model:
+    source: random
+    seed: 42
+    chunks: 1000
+    chunk_chars: 4
+    first_delay: 100ms
+    interval: 10ms
+
+  replay-model:
+    source: jsonl
+    path: ../datasets/responses.jsonl
+    text_field: result
+    chunk_chars: 3
+    first_delay: 100ms
+    interval: 30ms
