@@ -1,13 +1,13 @@
 # v0.1 contract appendix
 
-Stages 1 and 2 implement the HTTP API below for one model with random output or JSONL replay. Multi-model configuration remains planned. Start with the [visual design](design-v0.1.md) or [manual commands](manual-testing.md).
+Stages 1–3 implement the HTTP API below with random output, JSONL replay and multiple model profiles. Start with the [visual design](design-v0.1.md) or [manual commands](manual-testing.md).
 
 ## Endpoints and fields
 
 | Item | v0.1 behaviour |
 |---|---|
 | `POST /v1/chat/completions` | One assistant choice; text messages only. |
-| `GET /v1/models` | Advertise the configured model name (`mock-model` by default). |
+| `GET /v1/models` | List all configured model names in sorted order (`mock-model` for the default CLI setup). |
 | `GET /health` | Ready after configuration and dataset validation. |
 | `model`, `messages` | Require a known model and a non-empty array of messages with string content. Prompt contents do not choose the response. |
 | `stream` | Defaults to false; both modes share content planning and timing. |
@@ -86,9 +86,32 @@ Output length comes from the selected record; `--chunks` and `--seed` cannot be 
 
 After request validation, reserve the next record under a short cursor lock and release it before chunking, waiting or writing. There is no request-time file access or JSON parsing. Records cycle in assignment order, not completion order, and SSE/JSON share that order. Cancellation consumes a claimed record; invalid requests consume none. Restart resets the cursor. Editing or deleting the file does not affect an already loaded server.
 
-### Multiple models (planned)
+### Multiple models
 
-Each model will own an independent source and cursor. YAML dataset paths will resolve from the configuration directory. CLI model options and `--config` will be mutually exclusive, with a listen-address override allowed. `--config` is not implemented yet.
+`--config PATH` loads a YAML configuration containing a non-empty `models` mapping. Each model requires `source: random` or `source: jsonl`; other options default to the single-model CLI values. The [runnable example](../examples/configs/multi-model.yaml) includes both sources:
+
+```yaml
+listen: "127.0.0.1:9900"
+write_timeout: 10s
+models:
+  random-model:
+    source: random
+    chunks: 10
+    interval: 10ms
+  replay-model:
+    source: jsonl
+    path: ../datasets/responses.jsonl
+    text_field: result
+    interval: 30ms
+```
+
+JSONL paths resolve from the YAML file's directory. `path` and `text_field` belong to JSONL profiles; `seed` and `chunks` belong to random profiles. Both sources accept `chunk_chars`, `first_delay` and `interval`. `listen` and `write_timeout` are server-wide; `--listen` and `--write-timeout` override YAML values. Other model flags cannot be combined with `--config`.
+
+The configuration must be a regular file of at most 1 MiB. Use plain mappings; YAML aliases and merge keys are unsupported. Durations use units, such as `100ms` or `0s`; counts are integers, such as `chunks: 10`. Reject unknown fields, duplicate keys or model names, invalid types, empty model maps and multiple YAML documents. Validate all profiles and load all datasets before listening; one invalid model prevents the entire service from starting. Restart to apply changes.
+
+Each model owns its source and assignment state, even when profiles use the same dataset path or seed. Matching seeds and parameters reproduce matching sequences independently; they do not promise different text. Registry lookup is read-only after startup. A source lock covers only record or sequence-number assignment, never generation waits or network writes. Response metadata reports the selected model, and unknown names return a JSON 404 error before SSE starts or any cursor advances.
+
+A delayed or blocked request does not hold another model's source lock. All models still share CPU, memory and network resources, so overload can affect their observed timing. There is no admission limit or verified 10,000-stream capacity claim.
 
 ## First real integration: LLM-LA Sidecar
 
@@ -116,7 +139,7 @@ The current Sidecar checks `/health` and `/v1/models`, asks for `stream_options.
 | Random source + HTTP | A fixed seed reproduces assigned text; SSE concatenation matches complete JSON for the same plan; every response finishes correctly. |
 | Pacing + cancellation | Block the second write until 230ms: the next starts at or after 260ms. No chunks are dropped; disconnects release the request. Use a fake clock and writer. |
 | JSONL replay | Records cycle 1, 2, 1 across both modes; Unicode round-trips; cancellation consumes a claimed record; bad data fails before listening. |
-| Multiple models (planned) | Each model owns its source and cursor; requests select the named model. |
+| Multiple models | Concurrent requests preserve model-specific content and cursors; seeded sequences are independent; slow waits/writes do not hold up other models' handlers; unknown names return 404. |
 | Field compatibility | Extra `user` is ignored; malformed core fields and unsupported `tools` return 400. |
 | Container packaging (planned) | The executable and container serve the same configuration and pass the same HTTP smoke checks. |
 | Real Sidecar (planned) | Start with one Sidecar. Then target 32 Sidecars and client concurrency 32/48/64/80/96/128, with 1000 chunks, a 30ms first delay and a 30ms interval (30s nominal). Compare direct and Router paths on recorded hardware. |

@@ -30,7 +30,7 @@ func invalid(param, message string) *apiError {
 	return &apiError{Message: message, Type: "invalid_request_error", Param: param, Code: "invalid_request"}
 }
 
-func readRequest(w http.ResponseWriter, r *http.Request, model string) (chatRequest, int, *apiError) {
+func readRequest(w http.ResponseWriter, r *http.Request) (chatRequest, int, *apiError) {
 	var req chatRequest
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxRequestBytes))
 	if err != nil {
@@ -103,9 +103,6 @@ func readRequest(w http.ResponseWriter, r *http.Request, model string) (chatRequ
 				return req, http.StatusBadRequest, invalid("stream_options.include_usage", "include_usage must be a boolean; usage accounting is omitted.")
 			}
 		}
-	}
-	if req.model != model {
-		return req, http.StatusNotFound, &apiError{Message: fmt.Sprintf("Model %q is not configured.", req.model), Type: "invalid_request_error", Param: "model", Code: "model_not_found"}
 	}
 	return req, 0, nil
 }

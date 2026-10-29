@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,15 +20,39 @@ import (
 )
 
 type server struct {
-	cfg  config.Config
+	models       map[string]*model
+	names        []string
+	writeTimeout time.Duration
+}
+
+type model struct {
+	cfg  config.ModelConfig
 	next func() ([]string, error)
 }
 
-// New validates and loads one model's content source before any requests arrive.
+// New loads every model before returning an immutable registry. Each model owns
+// its own content source, even if models refer to the same file or random seed.
 func New(cfg config.Config) (http.Handler, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	profiles := cfg.Profiles()
+	s := &server{models: make(map[string]*model, len(profiles)), writeTimeout: cfg.WriteTimeout}
+	for name := range profiles {
+		s.names = append(s.names, name)
+	}
+	sort.Strings(s.names)
+	for _, name := range s.names {
+		m, err := newModel(profiles[name])
+		if err != nil {
+			return nil, fmt.Errorf("model %q: %w", name, err)
+		}
+		s.models[name] = m
+	}
+	return s, nil
+}
+
+func newModel(cfg config.ModelConfig) (*model, error) {
 	if cfg.Dataset != "" {
 		replay, err := source.LoadJSONL(cfg.Dataset, cfg.TextField, cfg.ChunkChars)
 		if err != nil {
@@ -35,13 +61,13 @@ func New(cfg config.Config) (http.Handler, error) {
 		if err := cfg.ValidateDuration(replay.MaxChunks()); err != nil {
 			return nil, err
 		}
-		return &server{cfg: cfg, next: replay.Next}, nil
+		return &model{cfg: cfg, next: replay.Next}, nil
 	}
 	random, err := source.NewRandom(cfg.Seed)
 	if err != nil {
 		return nil, err
 	}
-	return &server{cfg: cfg, next: func() ([]string, error) {
+	return &model{cfg: cfg, next: func() ([]string, error) {
 		return random.Next(cfg.Chunks, cfg.ChunkChars)
 	}}, nil
 }
@@ -66,9 +92,13 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/health":
 		s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	case "/v1/models":
+		data := make([]map[string]any, 0, len(s.names))
+		for _, name := range s.names {
+			data = append(data, map[string]any{"id": name, "object": "model", "created": 0, "owned_by": "polyjuice-stream"})
+		}
 		s.writeJSON(w, http.StatusOK, map[string]any{
 			"object": "list",
-			"data":   []map[string]any{{"id": s.cfg.Model, "object": "model", "created": 0, "owned_by": "polyjuice-stream"}},
+			"data":   data,
 		})
 	default:
 		s.chat(w, r)
@@ -76,9 +106,17 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) chat(w http.ResponseWriter, r *http.Request) {
-	req, status, validationErr := readRequest(w, r, s.cfg.Model)
+	req, status, validationErr := readRequest(w, r)
 	if validationErr != nil {
 		s.writeError(w, status, validationErr)
+		return
+	}
+	m, exists := s.models[req.model]
+	if !exists {
+		s.writeError(w, http.StatusNotFound, &apiError{
+			Message: fmt.Sprintf("Model %q is not configured.", req.model),
+			Type:    "invalid_request_error", Param: "model", Code: "model_not_found",
+		})
 		return
 	}
 	if req.stream && !canFlush(w) {
@@ -89,12 +127,12 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Selection owns its cursor update. Waiting and transport never hold its lock.
-	chunks, err := s.next()
+	chunks, err := m.next()
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, internalError("Unable to generate response content."))
 		return
 	}
-	plan, err := generation.NewPlan(chunks, s.cfg.FirstDelay, s.cfg.Interval, req.limit)
+	plan, err := generation.NewPlan(chunks, m.cfg.FirstDelay, m.cfg.Interval, req.limit)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, internalError("Unable to plan response content."))
 		return
@@ -189,7 +227,7 @@ func (s *server) writeFrame(w http.ResponseWriter, controller *http.ResponseCont
 }
 
 func (s *server) setDeadline(controller *http.ResponseController) error {
-	err := controller.SetWriteDeadline(time.Now().Add(s.cfg.WriteTimeout))
+	err := controller.SetWriteDeadline(time.Now().Add(s.writeTimeout))
 	// In-memory recorders may not support deadlines. net/http connections do.
 	if errors.Is(err, http.ErrNotSupported) {
 		return nil

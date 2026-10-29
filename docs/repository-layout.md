@@ -1,6 +1,6 @@
 # Repository layout
 
-Polyjuice Stream uses `polyjuice-stream` for its executable and release name. Stages 1 and 2 contain a runnable Go server with random output or JSONL replay, tests, documentation and synthetic examples. Multi-model configuration and container packaging are planned.
+Polyjuice Stream uses `polyjuice-stream` for its executable and release name. Stages 1–3 contain a runnable Go server with random output, JSONL replay and independent model profiles, plus tests, documentation and synthetic examples. Container packaging is planned.
 
 ```text
 llm-engine-generator/
@@ -9,6 +9,7 @@ llm-engine-generator/
 ├── .editorconfig
 ├── .gitignore
 ├── go.mod
+├── go.sum
 ├── Makefile
 ├── .github/workflows/ci.yml
 ├── docs/
@@ -18,10 +19,10 @@ llm-engine-generator/
 │   └── repository-layout.md
 ├── src/
 │   ├── cmd/polyjuice-stream/  # Executable entry point
-│   ├── config/           # Flags, defaults and validation; YAML planned
+│   ├── config/           # CLI/YAML parsing, model profiles and validation
 │   ├── source/           # Random text and validated cyclic JSONL replay
 │   ├── generation/       # Shared response plans, chunking and timing
-│   └── httpapi/          # Request validation, SSE and JSON responses
+│   └── httpapi/          # Model selection, request validation, SSE and JSON
 ├── tests/
 │   ├── config/
 │   ├── source/

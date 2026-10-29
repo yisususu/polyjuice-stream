@@ -109,6 +109,72 @@ printf '%s\n' '{"result":"Valid first record"}' '{"output":"Missing result"}' > 
 
 Expect a nonzero exit and an error containing `data/broken.jsonl:2`, with no `Listening on` message. Malformed JSON, invalid Unicode, empty text and size-limit failures also stop startup. See the [limits and field rules](http-contract.md#jsonl-replay).
 
+## Serve multiple models
+
+Stop the previous server, then start both example profiles:
+
+```sh
+make build
+./bin/polyjuice-stream serve --config examples/configs/multi-model.yaml
+```
+
+From another terminal, discover the names and request each one:
+
+```sh
+curl -fsS http://127.0.0.1:9900/v1/models
+
+curl -fsSN http://127.0.0.1:9900/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"random-model","messages":[{"role":"user","content":"Hello"}],"stream":true}'
+
+curl -fsS http://127.0.0.1:9900/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"replay-model","messages":[{"role":"user","content":"Hello"}],"stream":false}'
+```
+
+Expect discovery to list `random-model` and `replay-model`. The random profile sends ten content chunks; the first replay request returns `Hello LLM`. Random requests do not advance the replay cursor. The next replay requests return `Next text`, then `Hello LLM`.
+
+Unknown models return a JSON error with HTTP 404:
+
+```sh
+curl -sS -i http://127.0.0.1:9900/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"missing-model","messages":[{"role":"user","content":"Hello"}],"stream":true}'
+```
+
+Model names must match the YAML keys. The single-model request files use `mock-model`, which is not present in this example configuration. Dataset paths resolve relative to the YAML file, so the configuration works when launched from another working directory.
+
+Use `--listen 127.0.0.1:9901` or `--write-timeout 5s` alongside `--config` to override server settings. Model flags such as `--model`, `--dataset` and `--interval` cannot be combined with `--config`; put those settings in each profile. Configuration and all datasets are validated before listening; an invalid model prevents the whole service from starting.
+
+## Observe slow and fast models together
+
+Restart with the [isolation example](../examples/configs/model-isolation.yaml):
+
+```sh
+./bin/polyjuice-stream serve --config examples/configs/model-isolation.yaml
+```
+
+`slow-model` waits five seconds between content chunks; `fast-model` has no simulated delay. In another terminal, this block starts a slow stream in the background, requests the fast model, then cancels and cleans up the slow client:
+
+```sh
+(
+  curl -fsSN --max-time 20 http://127.0.0.1:9900/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"slow-model","messages":[{"role":"user","content":"Slow"}],"stream":true}' >&2 &
+  slow_request_pid=$!
+  trap 'kill "$slow_request_pid" 2>/dev/null || true; wait "$slow_request_pid" 2>/dev/null || true' EXIT
+  sleep 1
+  curl -fsS --max-time 5 -w '\nFast request took %{time_total}s\n' \
+    http://127.0.0.1:9900/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"fast-model","messages":[{"role":"user","content":"Fast"}],"stream":false}'
+)
+```
+
+On a fresh server, the slow stream first emits `"Slow "`; the fast response returns `"Fast response one."` while that stream is still waiting. Its next request returns `"Fast response two."`. Cancelling the slow request consumes only the slow model's claimed record.
+
+This demonstrates independent request progress, not a latency or capacity guarantee. Models share CPU, memory and network resources. The automated tests also block a writer directly to check that network sends do not hold source locks.
+
 ## Run the checks
 
 ```sh
@@ -123,4 +189,4 @@ To rerun source, HTTP and executable checks with test names visible:
 go test -v ./tests/source ./tests/httpapi ./tests/integration
 ```
 
-These include cyclic replay, Unicode reconstruction, cancellation after selection and startup failures. `./bin/polyjuice-stream serve --help` lists available options. Multi-model YAML configuration and container packaging remain planned.
+These include cyclic replay, Unicode reconstruction, cancellation after selection, startup failures, independent model cursors and random sequences, and concurrent slow/fast requests. `./bin/polyjuice-stream serve --help` lists available options. Container packaging and real gateway integrations remain planned.

@@ -53,7 +53,7 @@ func TestInvalidConfiguration(t *testing.T) {
 		{"invalid duration", []string{"--interval", "30"}},
 		{"zero timeout", []string{"--write-timeout", "0s"}},
 		{"invalid seed", []string{"--seed", "example"}},
-		{"future config flag", []string{"--config", "models.yaml"}},
+		{"missing config file", []string{"--config", "models.yaml"}},
 		{"empty dataset", []string{"--dataset", ""}},
 		{"field without dataset", []string{"--text-field", "result"}},
 		{"empty field", []string{"--dataset", "data.jsonl", "--text-field", ""}},

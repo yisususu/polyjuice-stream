@@ -1,4 +1,4 @@
-# Start Polyjuice Stream with --model replay-model --dataset examples/datasets/responses.jsonl.
+# Start Polyjuice Stream with --config examples/configs/multi-model.yaml.
 # For the default random model, change openai/replay-model to openai/mock-model.
 # This LiteLLM integration has not been verified yet.
 # Run LiteLLM on the same host, or replace api_base with a reachable service URL.

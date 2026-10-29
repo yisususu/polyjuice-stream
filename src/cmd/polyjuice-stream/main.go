@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 	"time"
 
@@ -63,12 +64,21 @@ func run(args []string, output io.Writer) int {
 	result := make(chan error, 1)
 	go func() { result <- server.Serve(listener) }()
 	fmt.Fprintf(output, "Polyjuice Stream\nListening on http://%s\n", listener.Addr())
-	if cfg.Dataset != "" {
-		fmt.Fprintf(output, "Source: JSONL | dataset: %s | text field: %s | selection: sequential loop\n", cfg.Dataset, cfg.TextField)
-	} else {
-		fmt.Fprintf(output, "Source: random | chunks: %d\n", cfg.Chunks)
+	profiles := cfg.Profiles()
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
 	}
-	fmt.Fprintf(output, "Model: %s | chunk chars: %d | first delay: %s | interval: %s\n", cfg.Model, cfg.ChunkChars, cfg.FirstDelay, cfg.Interval)
+	sort.Strings(names)
+	for _, name := range names {
+		profile := profiles[name]
+		fmt.Fprintf(output, "Model: %s | chunk chars: %d | first delay: %s | interval: %s\n", name, profile.ChunkChars, profile.FirstDelay, profile.Interval)
+		if profile.Dataset != "" {
+			fmt.Fprintf(output, "  Source: JSONL | dataset: %s | text field: %s | selection: sequential loop\n", profile.Dataset, profile.TextField)
+		} else {
+			fmt.Fprintf(output, "  Source: random | chunks: %d\n", profile.Chunks)
+		}
+	}
 	select {
 	case err := <-result:
 		if !errors.Is(err, http.ErrServerClosed) {

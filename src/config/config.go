@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,26 +16,56 @@ import (
 	"github.com/yisususu/polyjuice-stream/src/source"
 )
 
-// Config describes one model backed by random text or a JSONL dataset.
+// Config describes the listener and either a CLI model or named model profiles.
 type Config struct {
 	Listen       string
 	Model        string
-	Chunks       int
-	ChunkChars   int
-	FirstDelay   time.Duration
-	Interval     time.Duration
-	Seed         *int64
-	Dataset      string
-	TextField    string
 	WriteTimeout time.Duration
+	ModelConfig
+	Models map[string]ModelConfig
+}
+
+// ModelConfig owns the content and timing settings for one independent model.
+// A non-empty Dataset selects JSONL; otherwise the source generates random text.
+type ModelConfig struct {
+	Chunks     int
+	ChunkChars int
+	FirstDelay time.Duration
+	Interval   time.Duration
+	Seed       *int64
+	Dataset    string
+	TextField  string
 }
 
 func Default() Config {
 	return Config{
-		Listen: "127.0.0.1:9900", Model: "mock-model", Chunks: 100, ChunkChars: 4,
-		FirstDelay: 100 * time.Millisecond, Interval: 30 * time.Millisecond,
-		WriteTimeout: 10 * time.Second, TextField: "result",
+		Listen: "127.0.0.1:9900", Model: "mock-model", WriteTimeout: 10 * time.Second,
+		ModelConfig: DefaultModel(),
 	}
+}
+
+func DefaultModel() ModelConfig {
+	return ModelConfig{
+		Chunks: 100, ChunkChars: 4, FirstDelay: 100 * time.Millisecond,
+		Interval: 30 * time.Millisecond, TextField: "result",
+	}
+}
+
+// Profiles returns a copy so callers do not retain the mutable configuration map.
+func (c Config) Profiles() map[string]ModelConfig {
+	profiles := c.Models
+	if profiles == nil {
+		profiles = map[string]ModelConfig{c.Model: c.ModelConfig}
+	}
+	result := make(map[string]ModelConfig, len(profiles))
+	for name, model := range profiles {
+		if model.Seed != nil {
+			seed := *model.Seed
+			model.Seed = &seed
+		}
+		result[name] = model
+	}
+	return result
 }
 
 func (c Config) Validate() error {
@@ -46,9 +77,37 @@ func (c Config) Validate() error {
 	if err != nil || portNumber < 0 || portNumber > 65535 {
 		return errors.New("listen port must be an integer between 0 and 65535")
 	}
-	if c.Model == "" || strings.TrimSpace(c.Model) != c.Model || strings.ContainsFunc(c.Model, unicode.IsControl) {
+	if c.WriteTimeout <= 0 {
+		return errors.New("write-timeout must be greater than zero")
+	}
+	profiles := c.Profiles()
+	if len(profiles) == 0 {
+		return errors.New("models must contain at least one model")
+	}
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := validateModelName(name); err != nil {
+			return err
+		}
+		if err := profiles[name].Validate(); err != nil {
+			return fmt.Errorf("model %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validateModelName(name string) error {
+	if name == "" || strings.TrimSpace(name) != name || strings.ContainsFunc(name, unicode.IsControl) {
 		return errors.New("model must be non-empty, with no surrounding whitespace or control characters")
 	}
+	return nil
+}
+
+func (c ModelConfig) Validate() error {
 	if c.Dataset == "" {
 		if c.TextField != "" && c.TextField != "result" {
 			return errors.New("text-field requires a dataset")
@@ -74,14 +133,11 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
-	if c.WriteTimeout <= 0 {
-		return errors.New("write-timeout must be greater than zero")
-	}
 	return nil
 }
 
 // ValidateDuration checks the nominal generation duration for a selected size.
-func (c Config) ValidateDuration(chunks int) error {
+func (c ModelConfig) ValidateDuration(chunks int) error {
 	if chunks < 1 {
 		return errors.New("generation must contain at least one chunk")
 	}
@@ -94,14 +150,16 @@ func (c Config) ValidateDuration(chunks int) error {
 	return nil
 }
 
-// Parse accepts the flags after the serve subcommand. Model files are a later stage.
+// Parse accepts either single-model flags or a YAML file, with listener overrides.
 func Parse(args []string, output io.Writer) (Config, error) {
 	cfg := Default()
+	var configPath string
 	if output == nil {
 		output = io.Discard
 	}
 	fs := flag.NewFlagSet("polyjuice-stream serve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.StringVar(&configPath, "config", "", "YAML file defining named model profiles; cannot be combined with model flags")
 	fs.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address (host:port)")
 	fs.StringVar(&cfg.Model, "model", cfg.Model, "model name advertised by /v1/models")
 	fs.IntVar(&cfg.Chunks, "chunks", cfg.Chunks, "number of simulated content chunks per random response")
@@ -136,6 +194,30 @@ func Parse(args []string, output io.Writer) (Config, error) {
 	}
 	set := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set["config"] {
+		if configPath == "" {
+			return Config{}, errors.New("config path must not be empty")
+		}
+		for _, name := range []string{"model", "dataset", "text-field", "chunks", "chunk-chars", "seed", "first-delay", "interval"} {
+			if set[name] {
+				return Config{}, fmt.Errorf("--config cannot be combined with --%s; set model options in YAML", name)
+			}
+		}
+		loaded, err := Load(configPath)
+		if err != nil {
+			return Config{}, err
+		}
+		if set["listen"] {
+			loaded.Listen = cfg.Listen
+		}
+		if set["write-timeout"] {
+			loaded.WriteTimeout = cfg.WriteTimeout
+		}
+		if err := loaded.Validate(); err != nil {
+			return Config{}, err
+		}
+		return loaded, nil
+	}
 	if set["dataset"] && cfg.Dataset == "" {
 		return Config{}, errors.New("dataset path must not be empty")
 	}

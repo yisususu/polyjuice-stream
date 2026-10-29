@@ -1,0 +1,18 @@
+# Run: ./bin/polyjuice-stream serve --config examples/configs/model-isolation.yaml
+# Start a slow stream, then request fast-model while the slow stream is open.
+listen: "127.0.0.1:9900"
+
+models:
+  slow-model:
+    source: jsonl
+    path: ../datasets/slow-responses.jsonl
+    chunk_chars: 5
+    first_delay: 0s
+    interval: 5s
+
+  fast-model:
+    source: jsonl
+    path: ../datasets/fast-responses.jsonl
+    chunk_chars: 5
+    first_delay: 0s
+    interval: 0s

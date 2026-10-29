@@ -1,12 +1,13 @@
-# Planned multi-model configuration; --config is not supported yet.
-# A single JSONL source is available now with --dataset and --text-field.
+# Run: ./bin/polyjuice-stream serve --config examples/configs/multi-model.yaml
+# Dataset paths resolve from this file's directory.
 listen: "127.0.0.1:9900"
+write_timeout: 10s
 
 models:
   random-model:
     source: random
     seed: 42
-    chunks: 1000
+    chunks: 10
     chunk_chars: 4
     first_delay: 100ms
     interval: 10ms

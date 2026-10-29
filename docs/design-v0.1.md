@@ -1,6 +1,6 @@
 # Polyjuice Stream v0.1
 
-> Stages 1 and 2 are implemented: one model with random output or JSONL replay, configurable timing, SSE and complete JSON. Multiple models, containers and the integrations below remain planned.
+> Stages 1–3 are implemented: random output, JSONL replay, multiple model profiles, configurable timing, SSE and complete JSON. Containers and the integrations below remain planned.
 
 Turn random text or recorded outputs into a callable model service with one command. Save accelerator resources while testing gateways, routers and clients.
 
@@ -17,27 +17,29 @@ make build
 
 # Reproduce the original 30-second workload
 ./bin/polyjuice-stream serve --chunks 1000 --first-delay 30ms --interval 30ms
+
+# Serve random-model and replay-model on one endpoint
+./bin/polyjuice-stream serve --config examples/configs/multi-model.yaml
 ```
 
-The following commands are **planned**, not available yet:
+Container packaging is **planned**, not available yet:
 
 ```sh
-# Multiple model profiles
-polyjuice-stream serve --config examples/configs/multi-model.yaml
-
 # Container packaging (proposed local image name)
 docker run --rm -p 127.0.0.1:9900:9900 \
   -v "$PWD/examples:/examples:ro" polyjuice-stream:local serve \
   --listen 0.0.0.0:9900 --config /examples/configs/multi-model.yaml
 ```
 
-Today, flags control one model. Choose random output with `--chunks 100`, or replay with `--dataset examples/datasets/responses.jsonl`. Both share `--model`, `--chunk-chars`, `--first-delay` and `--interval`. The future [model configuration](../examples/configs/multi-model.yaml) gives multiple models independent settings.
+Flags still control one model. Choose random output with `--chunks 100`, or replay with `--dataset examples/datasets/responses.jsonl`. For multiple models, use the [YAML configuration](../examples/configs/multi-model.yaml); each request's `model` selects a profile. Dataset paths in YAML resolve relative to that configuration file.
 
 ## 2. One plan, two response modes
 
 ![v0.1 architecture](../assets/images/02-architecture.png)
 
-One model profile selects either a random source or an in-memory JSONL source. The diagram also shows planned multi-model selection. At startup, load and validate the entire dataset before listening. Each valid request claims a record, then builds the same response plan used for random output. SSE and complete JSON share its text and generation waits; blocked writes can extend the actual duration.
+At startup, build a fixed registry of model names and validate every profile and dataset before listening. A request selects its model's random or JSONL source, claims content, then builds the shared response plan. SSE and complete JSON use the same text and generation waits; blocked writes can extend the actual duration.
+
+For example, `random-model` can emit every 10ms while `replay-model` emits every 30ms. Each owns its random sequence or replay cursor, even when two profiles use the same seed or dataset path. Locks cover only content assignment; waiting and network writes happen after release. Unknown names return 404 before content is claimed. Models still share the process's CPU, memory and network capacity.
 
 **First integration:** LLM-LA with its real Sidecar, initially in single-model mode with switching disabled. LiteLLM below demonstrates the ordinary HTTP boundary. Engine-specific sleep/wake controls remain outside this first integration.
 
@@ -57,7 +59,7 @@ Our [sample dataset](../examples/datasets/responses.jsonl) contains:
   --dataset examples/datasets/responses.jsonl --chunk-chars 3
 ```
 
-`replay-model` selects record 1, record 2, then record 1 again, regardless of prompt. A cancelled request consumes its claimed record; an invalid request consumes none. Both response modes share the cursor. Separate requests can therefore return different text—even when only `stream` changes. The diagram's simultaneous model profiles are a future capability.
+`replay-model` selects record 1, record 2, then record 1 again, regardless of prompt. A cancelled request consumes its claimed record; an invalid request consumes none. Both response modes share that model's cursor. Separate requests can therefore return different text—even when only `stream` changes. Requests to another model do not advance this cursor.
 
 Use `--text-field output` to select another top-level key. Missing fields, malformed JSON, invalid Unicode and size-limit failures stop startup with the file and line number. [Manual checks](manual-testing.md) include Chinese, emoji and cancellation examples.
 
@@ -106,7 +108,7 @@ One output unit is one text chunk, not a real model token. `max_tokens: 2` caps 
 
 ## Build and check
 
-**Current:** random or JSONL source + both response modes + local executable. **Next:** multiple models → container packaging → real Sidecar integration. [Manual commands](manual-testing.md) and [acceptance checks](http-contract.md#implementation-checks) cover replay, pacing, cancellation and compatibility.
+**Current:** random or JSONL sources + independent model profiles + both response modes + local executable. **Next:** container packaging → real Sidecar integration. [Manual commands](manual-testing.md) and [acceptance checks](http-contract.md#implementation-checks) cover replay, model isolation, pacing, cancellation and compatibility.
 
 Keep the release small: text Chat Completions, `/v1/models` and `/health`. The [contract appendix](http-contract.md) holds field rules and integration notes; the [layout guide](repository-layout.md) explains source folders.
 
