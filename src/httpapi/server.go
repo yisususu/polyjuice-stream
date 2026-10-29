@@ -18,20 +18,32 @@ import (
 )
 
 type server struct {
-	cfg    config.Config
-	random *source.Random
+	cfg  config.Config
+	next func() ([]string, error)
 }
 
-// New creates an independent server and random sequence for one model.
+// New validates and loads one model's content source before any requests arrive.
 func New(cfg config.Config) (http.Handler, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+	if cfg.Dataset != "" {
+		replay, err := source.LoadJSONL(cfg.Dataset, cfg.TextField, cfg.ChunkChars)
+		if err != nil {
+			return nil, err
+		}
+		if err := cfg.ValidateDuration(replay.MaxChunks()); err != nil {
+			return nil, err
+		}
+		return &server{cfg: cfg, next: replay.Next}, nil
 	}
 	random, err := source.NewRandom(cfg.Seed)
 	if err != nil {
 		return nil, err
 	}
-	return &server{cfg: cfg, random: random}, nil
+	return &server{cfg: cfg, next: func() ([]string, error) {
+		return random.Next(cfg.Chunks, cfg.ChunkChars)
+	}}, nil
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +88,8 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
 		return
 	}
-	chunks, err := s.random.Next(s.cfg.Chunks, s.cfg.ChunkChars)
+	// Selection owns its cursor update. Waiting and transport never hold its lock.
+	chunks, err := s.next()
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, internalError("Unable to generate response content."))
 		return

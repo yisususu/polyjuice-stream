@@ -54,7 +54,12 @@ func TestInvalidConfiguration(t *testing.T) {
 		{"zero timeout", []string{"--write-timeout", "0s"}},
 		{"invalid seed", []string{"--seed", "example"}},
 		{"future config flag", []string{"--config", "models.yaml"}},
-		{"future dataset flag", []string{"--dataset", "data.jsonl"}},
+		{"empty dataset", []string{"--dataset", ""}},
+		{"field without dataset", []string{"--text-field", "result"}},
+		{"empty field", []string{"--dataset", "data.jsonl", "--text-field", ""}},
+		{"dataset with random length", []string{"--dataset", "data.jsonl", "--chunks", "100"}},
+		{"dataset with random seed", []string{"--dataset", "data.jsonl", "--seed", "0"}},
+		{"dataset invalid chunk size", []string{"--dataset", "data.jsonl", "--chunk-chars", "0"}},
 		{"positional argument", []string{"example"}},
 	}
 	for _, tc := range cases {
@@ -63,6 +68,35 @@ func TestInvalidConfiguration(t *testing.T) {
 				t.Fatalf("accepted invalid flags %q", tc.args)
 			}
 		})
+	}
+}
+
+func TestDatasetConfiguration(t *testing.T) {
+	for _, field := range []string{"result", "output", "literal.key"} {
+		args := []string{"--dataset", "relative/path.jsonl", "--chunk-chars", "2"}
+		if field != "result" {
+			args = append(args, "--text-field", field)
+		}
+		cfg, err := config.Parse(args, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Dataset != "relative/path.jsonl" || cfg.TextField != field || cfg.ChunkChars != 2 || cfg.Seed != nil {
+			t.Fatalf("unexpected replay config: %+v", cfg)
+		}
+	}
+}
+
+func TestReplayDurationUsesLoadedRecordSize(t *testing.T) {
+	cfg, err := config.Parse([]string{"--dataset", "data.jsonl", "--first-delay", "0s", "--interval", "2000000h"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateDuration(2); err != nil {
+		t.Fatalf("two chunks fit within time.Duration: %v", err)
+	}
+	if err := cfg.ValidateDuration(3); err == nil {
+		t.Fatal("expected overflow for three chunks")
 	}
 }
 

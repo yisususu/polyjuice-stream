@@ -1,4 +1,5 @@
-# Planned JSONL/multi-model configuration; --config is not supported in Stage 1.
+# Planned multi-model configuration; --config is not supported yet.
+# A single JSONL source is available now with --dataset and --text-field.
 listen: "127.0.0.1:9900"
 
 models:

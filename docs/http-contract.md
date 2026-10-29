@@ -1,6 +1,6 @@
 # v0.1 contract appendix
 
-Stage 1 implements the HTTP API below for one random-output model. JSONL and multi-model rules are labelled as planned. Start with the [visual design](design-v0.1.md).
+Stages 1 and 2 implement the HTTP API below for one model with random output or JSONL replay. Multi-model configuration remains planned. Start with the [visual design](design-v0.1.md) or [manual commands](manual-testing.md).
 
 ## Endpoints and fields
 
@@ -8,7 +8,7 @@ Stage 1 implements the HTTP API below for one random-output model. JSONL and mul
 |---|---|
 | `POST /v1/chat/completions` | One assistant choice; text messages only. |
 | `GET /v1/models` | Advertise the configured model name (`mock-model` by default). |
-| `GET /health` | Ready after configuration validation. |
+| `GET /health` | Ready after configuration and dataset validation. |
 | `model`, `messages` | Require a known model and a non-empty array of messages with string content. Prompt contents do not choose the response. |
 | `stream` | Defaults to false; both modes share content planning and timing. |
 | `max_tokens`, `max_completion_tokens` | Positive simulated-chunk limits. Equal values are accepted together; conflicting values return 400. |
@@ -24,7 +24,7 @@ Use `finish_reason: length` only if the client limit truncates planned content; 
 
 ## Response examples
 
-These are illustrative wire-format examples for three chunks, `"Hel"`, `"lo "` and `"LLM"`; actual random text, IDs and timestamps vary. Use `--chunks 3 --chunk-chars 3` for this shape. Joining the deltas gives the complete response text. A seeded restart reproduces assigned text; successive requests still select new output. LiteLLM may normalise its downstream envelope. Real vLLM streams incrementally decoded model output; it does not split at a fixed character count, and a text delta can combine multiple tokens.
+These are wire-format examples for three chunks, `"Hel"`, `"lo "` and `"LLM"`; IDs and timestamps vary. Start with `--dataset examples/datasets/responses.jsonl --chunk-chars 3` to select this text on the first request. Joining the deltas gives the complete response text. Restart resets replay to the first record; successive requests advance the cursor. LiteLLM may normalise its downstream envelope. Real vLLM streams incrementally decoded model output; it does not split at a fixed character count, and a text delta can combine multiple tokens.
 
 ### SSE (`Content-Type: text/event-stream`)
 
@@ -67,11 +67,28 @@ The first role and content share an event. Flush each content event. Metadata an
 - Non-streaming waits for the same simulated generation time, then returns the joined text. For N chunks, the nominal delay is `first_delay + (N - 1) × interval`. Streaming writes can extend the actual duration; flush completion is not proof of client receipt.
 - Stop on cancellation or a write/flush error. Each write has a bounded deadline (`--write-timeout`, default 10s), so a stalled receiver cannot hold the request indefinitely. There is no unbounded producer queue.
 
-### JSONL and multiple models (planned)
+### JSONL replay
 
-Load JSONL once at startup; reject malformed JSON, invalid UTF-8, missing/non-string/empty selected fields and empty datasets. Skip blank lines. Split strings by Unicode code points and preserve the text when chunks are joined; the final chunk may be shorter.
+`--dataset PATH` selects a local JSONL file; relative paths resolve from the working directory. `--text-field result` is the default. The field name is an exact top-level key: `--text-field output` reads `{"output":"Hello"}`, and `--text-field answer.text` reads a literal `"answer.text"` key, not a nested object. There is no field autodetection.
 
-Each model will reserve its next record after validation, then release its cursor lock before waiting or writing. Records cycle in assignment order, not completion order. Cancellation consumes a record; restart resets the cursor. YAML dataset paths will resolve from the configuration directory. CLI paths will resolve from the working directory. CLI model options and `--config` will be mutually exclusive, with a listen-address override allowed. Neither `--config` nor `--dataset` is implemented yet.
+Load and validate every record once, before opening the listening socket. Skip blank lines, accept CRLF and a final line without a newline, and preserve selected text including whitespace. Reject malformed JSON, invalid UTF-8 anywhere in a record, unpaired surrogate escapes in the selected text, missing/null/non-string/empty selected fields, empty datasets and exceeded limits. Unselected metadata is ignored after JSON and UTF-8 validation. Errors identify the file and physical line, including skipped blank lines; they do not print record contents. Regular files are required.
+
+| Limit | Maximum |
+|---|---|
+| Whole file, including blank lines and line endings | 64 MiB |
+| JSONL line, excluding its line ending | 8 MiB |
+| Records | 100,000 |
+| Decoded text per record | 4 MiB |
+| Chunks per record | 100,000 |
+| `--chunk-chars` | 4,096 Unicode code points |
+
+Output length comes from the selected record; `--chunks` and `--seed` cannot be supplied with `--dataset`. Split text by Unicode code points, never inside a UTF-8 encoding. The final chunk may be shorter. Multi-code-point emoji and combining sequences may span chunks; joining them preserves the original string without normalisation. Client output limits apply to these chunks after selection.
+
+After request validation, reserve the next record under a short cursor lock and release it before chunking, waiting or writing. There is no request-time file access or JSON parsing. Records cycle in assignment order, not completion order, and SSE/JSON share that order. Cancellation consumes a claimed record; invalid requests consume none. Restart resets the cursor. Editing or deleting the file does not affect an already loaded server.
+
+### Multiple models (planned)
+
+Each model will own an independent source and cursor. YAML dataset paths will resolve from the configuration directory. CLI model options and `--config` will be mutually exclusive, with a listen-address override allowed. `--config` is not implemented yet.
 
 ## First real integration: LLM-LA Sidecar
 
@@ -98,7 +115,8 @@ The current Sidecar checks `/health` and `/v1/models`, asks for `stream_options.
 |---|---|
 | Random source + HTTP | A fixed seed reproduces assigned text; SSE concatenation matches complete JSON for the same plan; every response finishes correctly. |
 | Pacing + cancellation | Block the second write until 230ms: the next starts at or after 260ms. No chunks are dropped; disconnects release the request. Use a fake clock and writer. |
-| JSONL + models (planned) | Records cycle 1, 2, 1; each model owns its cursor; Unicode round-trips; invalid input fails before SSE headers. |
+| JSONL replay | Records cycle 1, 2, 1 across both modes; Unicode round-trips; cancellation consumes a claimed record; bad data fails before listening. |
+| Multiple models (planned) | Each model owns its source and cursor; requests select the named model. |
 | Field compatibility | Extra `user` is ignored; malformed core fields and unsupported `tools` return 400. |
 | Container packaging (planned) | The executable and container serve the same configuration and pass the same HTTP smoke checks. |
 | Real Sidecar (planned) | Start with one Sidecar. Then target 32 Sidecars and client concurrency 32/48/64/80/96/128, with 1000 chunks, a 30ms first delay and a 30ms interval (30s nominal). Compare direct and Router paths on recorded hardware. |

@@ -62,7 +62,13 @@ func run(args []string, output io.Writer) int {
 	// include deliberate generation waits and could terminate valid long streams.
 	result := make(chan error, 1)
 	go func() { result <- server.Serve(listener) }()
-	fmt.Fprintf(output, "Polyjuice Stream\nListening on http://%s\nModel: %s | chunks: %d | chunk chars: %d | first delay: %s | interval: %s\n", listener.Addr(), cfg.Model, cfg.Chunks, cfg.ChunkChars, cfg.FirstDelay, cfg.Interval)
+	fmt.Fprintf(output, "Polyjuice Stream\nListening on http://%s\n", listener.Addr())
+	if cfg.Dataset != "" {
+		fmt.Fprintf(output, "Source: JSONL | dataset: %s | text field: %s | selection: sequential loop\n", cfg.Dataset, cfg.TextField)
+	} else {
+		fmt.Fprintf(output, "Source: random | chunks: %d\n", cfg.Chunks)
+	}
+	fmt.Fprintf(output, "Model: %s | chunk chars: %d | first delay: %s | interval: %s\n", cfg.Model, cfg.ChunkChars, cfg.FirstDelay, cfg.Interval)
 	select {
 	case err := <-result:
 		if !errors.Is(err, http.ErrServerClosed) {
