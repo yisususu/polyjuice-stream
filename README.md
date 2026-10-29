@@ -4,40 +4,51 @@
 
 **One command. Mock LLM responses. No accelerators.**
 
-Turn random text or recorded LLM outputs into a model service for testing clients, gateways, routers and dispatchers—without running inference on a GPU, TPU or NPU.
+Turn random text or recorded LLM outputs into a model service for testing clients, gateways, routers and dispatchers—without running a model or requiring expensive accelerators.
 
-> **Design stage:** v0.1 is not implemented or released yet. The commands and features below describe the planned experience.
+> **Available now:** a Go server with random output, configurable timing, SSE and complete JSON responses. JSONL replay, multiple models and container packaging are next.
+
+## Why Polyjuice?
+
+In Harry Potter, the [Polyjuice Potion](https://www.harrypotter.com/fact-file/plants-and-potions/polyjuice-potion) changes a person's appearance into another person's. Polyjuice Stream gives simulated responses the outward form of real LLM output, such as vLLM streams, without running a model or requiring expensive accelerators.
+
+[Design](docs/design-v0.1.md) · [HTTP contract](docs/http-contract.md) · [Repository layout](docs/repository-layout.md)
 
 ## Designed to be easy
 
-```sh
-polyjuice-stream serve
-```
-
-Start with random output and no configuration. Point your client at `http://localhost:8000/v1`, using model name `mock-model`.
-
-![Planned experience: start with one command, connect your client or gateway, and receive mock responses.](assets/images/readme-quickstart.png)
-
-For recorded outputs or multiple models, use a [small configuration file](examples/configs/multi-model.yaml):
+Build from source with Go 1.25 or later, then start the server:
 
 ```sh
-polyjuice-stream serve --config examples/configs/multi-model.yaml
+make build
+./bin/polyjuice-stream serve
 ```
 
-Run the same service as a standalone Go executable or a container.
+No configuration is needed. Point your client at `http://127.0.0.1:9900/v1`, using model name `mock-model`.
+
+![Start the executable, connect your client or gateway, and receive mock responses.](assets/images/readme-quickstart.png)
+
+In another terminal:
+
+```sh
+curl -N http://127.0.0.1:9900/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d @examples/requests/random-stream.json
+```
+
+Set `stream` to `false` for one complete response after the same simulated generation time. To control the output length and pace:
+
+```sh
+./bin/polyjuice-stream serve --chunks 1000 --first-delay 30ms --interval 30ms
+```
+
+Defaults: 100 chunks, 4 characters per chunk, a 100ms first delay and a 30ms interval. Use `--model` to change the model name, `--seed` for repeatable text, or `--listen` to change the address. Run directly from source with `go run ./src/cmd/polyjuice-stream serve`.
 
 ## v0.1 goals
 
 ![Planned goals: random or recorded text, multiple model names, streaming or complete responses, and no accelerator required.](assets/images/readme-goals.png)
 
-- Replay JSONL records in order, ignoring prompts, or generate random text with an optional seed.
-- Give each model its own content source, output length and pace.
-- Support text Chat Completions with SSE (`stream: true`) or complete JSON (`stream: false`).
+- **Available:** generate random text with an optional seed; control output length and timing; return SSE or complete JSON.
+- **Next:** replay JSONL records in order, ignoring prompts; give each model its own content source and pace.
+- **Planned packaging:** a downloadable executable and a container image.
 
-Output units are simulated text chunks, not real model tokens. See the [visual design](docs/design-v0.1.md) for timing, API scope and implementation steps.
-
-## Why Polyjuice?
-
-In Harry Potter, the [Polyjuice Potion](https://www.harrypotter.com/fact-file/plants-and-potions/polyjuice-potion) changes a person's appearance into another person's. Polyjuice Stream gives simulated responses the outward form of real LLM output, such as vLLM streams, without running the model.
-
-[Design](docs/design-v0.1.md) · [HTTP contract](docs/http-contract.md) · [Repository layout](docs/repository-layout.md)
+The [multi-model configuration](examples/configs/multi-model.yaml) illustrates the planned interface; `--config` and `--dataset` are not supported yet. Output units are simulated text chunks, not real model tokens. See the [visual design](docs/design-v0.1.md) for timing and API scope.

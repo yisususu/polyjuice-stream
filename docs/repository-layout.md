@@ -1,6 +1,6 @@
 # Repository layout
 
-Polyjuice Stream uses `polyjuice-stream` for its executable and release name. This scaffold contains documentation, illustrative configuration and synthetic data. Source and test directories are placeholders; the application is not implemented yet.
+Polyjuice Stream uses `polyjuice-stream` for its executable and release name. Stage 1 contains a runnable Go server, tests, documentation and synthetic examples. JSONL replay, multi-model configuration and container packaging are planned.
 
 ```text
 llm-engine-generator/
@@ -8,14 +8,17 @@ llm-engine-generator/
 ├── AGENTS.md
 ├── .editorconfig
 ├── .gitignore
+├── go.mod
+├── Makefile
+├── .github/workflows/ci.yml
 ├── docs/
 │   ├── design-v0.1.md
 │   ├── http-contract.md
 │   └── repository-layout.md
 ├── src/
 │   ├── cmd/polyjuice-stream/  # Executable entry point
-│   ├── config/           # Flags, YAML, defaults and validation
-│   ├── source/           # Random text and JSONL record selection
+│   ├── config/           # Flags, defaults and validation; YAML planned
+│   ├── source/           # Random text; JSONL record selection planned
 │   ├── generation/       # Shared response plans, chunking and timing
 │   └── httpapi/          # Request validation, SSE and JSON responses
 ├── tests/
@@ -35,7 +38,7 @@ llm-engine-generator/
 
 The project keeps source in `src/`, mirrored tests in `tests/`, and static assets in `assets/`. Go packages are the directories under `src/`; a second `pkg/` layer would duplicate that grouping. These packages are implementation details, not a promised stable library API.
 
-The Go module and build configuration will live at the repository root. Add `go.mod`, a Makefile and CI with the first implementation. Planned Makefile targets are `setup`, `dev`, `build`, `lint` and `test`. Placeholder directories contain `.gitkeep` files so the structure can be committed later.
+The Go module, Makefile and CI live at the repository root. Use `make setup`, `make dev`, `make build`, `make lint` and `make test`. `make build` writes the executable to ignored `bin/polyjuice-stream`. Remaining placeholder directories contain `.gitkeep` files until they are needed.
 
 Use `examples/datasets/` for small, synthetic, shareable records. Local user datasets may live in ignored `data/`. Only PNG diagrams from `assets/images/` are published. Editable Excalidraw sources, SVG exports, conversation archives and conversation reference images are kept locally and excluded from Git. The release will include an executable and a container image; the future Dockerfile will live at the root.
 

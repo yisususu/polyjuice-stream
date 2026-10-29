@@ -1,5 +1,5 @@
-# Draft v0.1 configuration; no implementation exists yet.
-listen: "127.0.0.1:8000"
+# Planned JSONL/multi-model configuration; --config is not supported in Stage 1.
+listen: "127.0.0.1:9900"
 
 models:
   random-model:

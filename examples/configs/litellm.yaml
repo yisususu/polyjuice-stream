@@ -1,10 +1,12 @@
-# Proposed local integration; requires the future polyjuice-stream server to be running.
+# Planned replay integration; JSONL/replay-model is not available in Stage 1.
+# To try the current random model, change openai/replay-model to openai/mock-model.
+# This LiteLLM integration has not been verified yet.
 # Run LiteLLM on the same host, or replace api_base with a reachable service URL.
 model_list:
   - model_name: demo
     litellm_params:
       model: openai/replay-model
-      api_base: http://127.0.0.1:8000/v1
+      api_base: http://127.0.0.1:9900/v1
       api_key: unused
 
 general_settings:
